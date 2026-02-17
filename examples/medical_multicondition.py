@@ -18,6 +18,8 @@ import numpy as np
 from composition.nn_component import NNComponent, SimpleRiskNN
 from composition.problog_component import ProbLogComponent
 from composition.pipeline import CompositionPipeline
+from verification.categories import Category, Functor
+from verification.yoneda_checker import YonedaChecker
 
 
 # Medical treatment rules as Bayesian Logic Program
@@ -176,6 +178,88 @@ def main():
     ✓ Human-editable knowledge (LP rules modified without retraining)
     ✓ Coordination adaptation (degradation detection + response)
     """)
+
+    run_yoneda_verification()
+
+
+def run_yoneda_verification():
+    """Demonstrate categorical verification of the NN→LP lossy functor.
+
+    Builds a minimal NN category (state_low, state_high) and an LP category
+    (lp_false, lp_true), then defines a lossy functor that collapses both NN
+    states onto lp_true.  YonedaChecker exposes the non-faithfulness and shows
+    that the ordering invariant state_high > state_low cannot be certified to
+    persist under this particular functor.
+    """
+    print("\n" + "=" * 70)
+    print("YONEDA CATEGORICAL VERIFICATION")
+    print("(Verifying NN→LP functor properties via Hom-set profiles)")
+    print("=" * 70)
+
+    # --- NN Category ---
+    # Objects: NN activation states
+    # Morphisms: transitions between states (forward propagation steps)
+    nn_cat = Category("NeuralNetwork")
+    state_low = nn_cat.add_object("state_low")
+    state_high = nn_cat.add_object("state_high")
+    # Morphism: low activation can be boosted to high (one direction)
+    nn_cat.add_morphism(state_low, state_high, "activate")
+    # Extra morphism into state_high gives it a larger Hom-set — encoding the
+    # fact that state_high is "reachable from more states" (ordering)
+    nn_cat.add_morphism(state_low, state_high, "amplify")
+
+    print("\nNN Category objects:", [o.name for o in nn_cat.objects])
+    print("NN Category morphisms:", [m.name for m in nn_cat.morphisms
+                                     if not m.name.startswith("id_")])
+
+    # --- LP Category ---
+    # Objects: LP truth values / belief states
+    lp_cat = Category("LogicProgram")
+    lp_false = lp_cat.add_object("lp_false")
+    lp_true = lp_cat.add_object("lp_true")
+    lp_cat.add_morphism(lp_false, lp_true, "assert")
+
+    print("\nLP Category objects:", [o.name for o in lp_cat.objects])
+    print("LP Category morphisms:", [m.name for m in lp_cat.morphisms
+                                     if not m.name.startswith("id_")])
+
+    # --- Lossy Functor: NN → LP ---
+    # Both NN states map to lp_true — this collapses the ordering distinction.
+    # This models threshold translation: any activation above 0 → True.
+    lossy_F = Functor("NN_to_LP_lossy", nn_cat, lp_cat)
+    lossy_F.map_object(state_low, lp_true)   # lossy: low maps to True
+    lossy_F.map_object(state_high, lp_true)  # lossy: high also maps to True
+
+    print("\nFunctor object mappings:")
+    print(f"  state_low  → {lossy_F.apply_object(state_low).name}")
+    print(f"  state_high → {lossy_F.apply_object(state_high).name}")
+    print("  (Both states collapse to lp_true — ordering information destroyed)")
+
+    # --- Yoneda Verification ---
+    checker = YonedaChecker()
+    result = checker.verify_invariant_persistence(
+        source_cat=nn_cat,
+        target_cat=lp_cat,
+        functor=lossy_F,
+        invariant_type="ordering",
+        objects=[state_high, state_low],
+    )
+
+    print("\n" + "-" * 70)
+    print("PROOF STEPS (ordering invariant: state_high > state_low)")
+    print("-" * 70)
+    for step in result["proof_steps"]:
+        print(" ", step)
+
+    print("\n" + "-" * 70)
+    verified = result["verified"]
+    lossiness = result["lossiness"]
+    print(f"Verified:    {verified}")
+    print(f"Faithful:    {lossiness['faithful']}  "
+          f"(False → functor collapses morphisms → ordering not guaranteed)")
+    print(f"Full:        {lossiness['full']}")
+    print(f"Conclusion:  {'Ordering persists under functor' if verified else 'Ordering NOT certified — functor is lossy/non-faithful'}")
+    print("=" * 70)
 
 
 if __name__ == "__main__":
