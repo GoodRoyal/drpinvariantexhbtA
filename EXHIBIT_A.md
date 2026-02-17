@@ -1045,13 +1045,148 @@ DEMONSTRATION COMPLETE
 
 ---
 
+## Yoneda Formal Verification Output
+
+The updated `run_yoneda_verification()` demonstrates TWO functors: Functor A (degenerate collapse) that destroys ordering, and Functor B (proper threshold) that preserves it. Output from `python -m examples.medical_multicondition` (Yoneda section only):
+
+```
+======================================================================
+YONEDA VERIFICATION: Formal Invariant Persistence Analysis
+======================================================================
+
+--- Functor A: Collapse (threshold too low) ---
+Maps: state_low → lp_true, state_high → lp_true
+This models a threshold so low that all NN outputs pass.
+
+  Functor 'NN_to_LP_collapse' analysis: faithful=False, full=False
+    → Functor is NOT faithful (lossy): multiple source morphisms collapse to same target morphism
+  Yoneda profile Y(state_high): {|Hom(state_high, state_high)| = 1, |Hom(state_low, state_high)| = 2}
+  Yoneda profile Y(state_low): {|Hom(state_high, state_low)| = 0, |Hom(state_low, state_low)| = 1}
+  Yoneda profile Y(F(state_high)) = Y(lp_true): {|Hom(lp_true, lp_true)| = 1, |Hom(lp_false, lp_true)| = 1}
+  Yoneda profile Y(F(state_low)) = Y(lp_true): {|Hom(lp_true, lp_true)| = 1, |Hom(lp_false, lp_true)| = 1}
+  Source ordering: |Y(state_high)| = 3 > |Y(state_low)| = 1
+  Target ordering: |Y(F(state_high))| = 2 = |Y(F(state_low))| = 2
+  ✗ VIOLATED: Ordering changed from > to =
+
+  Ordering persists: False
+  Bounded persists:  True
+
+--- Functor B: Proper threshold ---
+Maps: state_low → lp_false, state_high → lp_true
+This models a well-calibrated threshold translation.
+
+  Functor 'NN_to_LP_threshold' analysis: faithful=False, full=True
+    → Functor is NOT faithful (lossy): multiple source morphisms collapse to same target morphism
+  Yoneda profile Y(state_high): {|Hom(state_high, state_high)| = 1, |Hom(state_low, state_high)| = 2}
+  Yoneda profile Y(state_low): {|Hom(state_high, state_low)| = 0, |Hom(state_low, state_low)| = 1}
+  Yoneda profile Y(F(state_high)) = Y(lp_true): {|Hom(lp_true, lp_true)| = 1, |Hom(lp_false, lp_true)| = 1}
+  Yoneda profile Y(F(state_low)) = Y(lp_false): {|Hom(lp_true, lp_false)| = 0, |Hom(lp_false, lp_false)| = 1}
+  Source ordering: |Y(state_high)| = 3 > |Y(state_low)| = 1
+  Target ordering: |Y(F(state_high))| = 2 > |Y(F(state_low))| = 1
+  ✓ VERIFIED: Ordering invariant persists under lossy functor
+
+  Ordering persists: True
+  Bounded persists:  True
+
+======================================================================
+YONEDA VERIFICATION SUMMARY
+======================================================================
+
+    Functor A (Collapse — degenerate threshold):
+      Ordering:    DESTROYED — both states collapse to same LP object
+      Boundedness: PRESERVED — objects remain in finite LP category
+
+    Functor B (Proper threshold):
+      Ordering:    PRESERVED — Hom-set magnitude ordering maintained
+      Boundedness: PRESERVED — objects remain in finite LP category
+
+    Key insight: The system detects WHICH invariants persist under
+    WHICH translations. A well-calibrated threshold preserves ordering;
+    a degenerate one destroys it. Structural invariant detection
+    identifies this automatically — enabling the coordination controller
+    to trigger reconfiguration when a previously-persistent invariant
+    degrades (e.g., threshold drift causes collapse).
+
+  Functor A faithful (injective on morphisms): False
+  Functor B faithful (injective on morphisms): False
+  → Both functors are lossy, but B preserves more structure than A
+======================================================================
+```
+
+| Property | Functor A (Collapse) | Functor B (Threshold) |
+|---|---|---|
+| Object map | state\_low → lp\_true, state\_high → lp\_true | state\_low → lp\_false, state\_high → lp\_true |
+| Faithful | False | False |
+| Ordering persists | **False** — destroyed by collapse | **True** — preserved by proper mapping |
+| Bounded persists | True | True |
+
+---
+
+## 3. Training Experiment (CLARA Phase 2 Evidence)
+
+**Command:** `python -m examples.training_experiment`
+
+Compares invariant-constrained (AR-based) vs unconstrained ML training across five training set sizes. Demonstrates that structural invariant constraints from the Logic Program allow models to reach compliance targets with fewer training samples.
+
+```
+======================================================================
+TRAINING EXPERIMENT: Constrained (AR-based) vs Unconstrained ML
+Evidence for CLARA Phase 2: Sample Complexity < SOA
+======================================================================
+
+Running experiment across sample sizes: [20, 50, 100, 200, 500]
+Each size tested 5 times, results averaged.
+
+     N |         Unconstrained          |     Constrained (AR-based)
+       |     Ordering      Bounded |     Ordering      Bounded
+---------------------------------------------------------------------------
+    20 |       89.6%         1.9% |      100.0%        75.1%
+    50 |       84.6%         2.8% |      100.0%        88.9%
+   100 |       79.9%         2.4% |      100.0%        98.0%
+   200 |       84.4%         2.3% |      100.0%        98.4%
+   500 |       85.6%         2.4% |      100.0%        96.6%
+
+======================================================================
+ANALYSIS
+======================================================================
+
+Target: 90% compliance on both invariants
+Unconstrained reaches target at N = >500
+Constrained reaches target at N = 100
+
+Constrained reaches target at N=100; unconstrained never reaches it
+→ Invariant constraints are necessary, not just helpful
+
+    CONCLUSION:
+    AR-based ML training (with structural invariant constraints from the
+    Logic Program) achieves invariant-compliant models with significantly
+    fewer training samples than standard unconstrained ML training.
+
+    This demonstrates the CLARA Phase 2 metric: Sample Complexity < SOA.
+    The AR scaffold (invariant constraints) encodes domain knowledge that
+    would otherwise require more training data to learn implicitly.
+```
+
+### Key observations
+
+| Property | Value |
+|---|---|
+| Training sizes tested | 20, 50, 100, 200, 500 samples |
+| Trials per size | 5 (averaged) |
+| Target compliance threshold | 90% on both ordering and bounded invariants |
+| Unconstrained reaches target | Never (>500 samples, bounded compliance stays ~2%) |
+| Constrained reaches target | **N = 100** (ordering 100%, bounded 98%) |
+| CLARA Phase 2 metric | **Sample Complexity < SOA** — constraints are necessary, not merely helpful |
+
+---
+
 ## Test Suite
 
-All 91 tests pass:
+All 94 tests pass:
 
 ```
 uv run pytest tests/ --tb=no -q
-91 passed, 23 warnings in 8.61s
+94 passed, 23 warnings in 7.72s
 ```
 
 | Test Module | Tests | Layer |
@@ -1066,5 +1201,7 @@ uv run pytest tests/ --tb=no -q
 | test_constrained_trainer.py | 8 | 4 — constrained trainer |
 | test_categories.py | 17 | 5 — category theory |
 | test_yoneda_checker.py | 10 | 5 — Yoneda verification |
+| test_yoneda_integration.py | 2 | 5 — Yoneda dual-functor |
 | test_examples.py | 10 | 6 — integration smoke |
-| **Total** | **91** | |
+| test_training_experiment.py | 1 | 6 — training experiment |
+| **Total** | **94** | |

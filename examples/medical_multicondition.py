@@ -183,82 +183,142 @@ def main():
 
 
 def run_yoneda_verification():
-    """Demonstrate categorical verification of the NN→LP lossy functor.
+    """Formal verification using Yoneda embedding.
 
-    Builds a minimal NN category (state_low, state_high) and an LP category
-    (lp_false, lp_true), then defines a lossy functor that collapses both NN
-    states onto lp_true.  YonedaChecker exposes the non-faithfulness and shows
-    that the ordering invariant state_high > state_low cannot be certified to
-    persist under this particular functor.
+    Demonstrates the core theoretical result: lossy functors destroy SOME
+    structural properties but preserve OTHERS. The system's value is
+    detecting which invariants persist under which translations.
     """
+    checker = YonedaChecker()
+
     print("\n" + "=" * 70)
-    print("YONEDA CATEGORICAL VERIFICATION")
-    print("(Verifying NN→LP functor properties via Hom-set profiles)")
+    print("YONEDA VERIFICATION: Formal Invariant Persistence Analysis")
     print("=" * 70)
 
-    # --- NN Category ---
-    # Objects: NN activation states
-    # Morphisms: transitions between states (forward propagation steps)
+    # --- Build NN Category ---
     nn_cat = Category("NeuralNetwork")
-    state_low = nn_cat.add_object("state_low")
-    state_high = nn_cat.add_object("state_high")
-    # Morphism: low activation can be boosted to high (one direction)
-    nn_cat.add_morphism(state_low, state_high, "activate")
-    # Extra morphism into state_high gives it a larger Hom-set — encoding the
-    # fact that state_high is "reachable from more states" (ordering)
-    nn_cat.add_morphism(state_low, state_high, "amplify")
+    s_low = nn_cat.add_object("state_low")    # NN output < threshold
+    s_high = nn_cat.add_object("state_high")  # NN output >= threshold
+    # Morphisms: two ways to go from low to high (different activation paths)
+    nn_cat.add_morphism(s_low, s_high, "activate")
+    nn_cat.add_morphism(s_low, s_high, "amplify")
+    # state_high has |Hom(-, state_high)| = 3 (id + activate + amplify)
+    # state_low  has |Hom(-, state_low)|  = 1 (id only)
+    # So state_high > state_low in Yoneda profile
 
-    print("\nNN Category objects:", [o.name for o in nn_cat.objects])
-    print("NN Category morphisms:", [m.name for m in nn_cat.morphisms
-                                     if not m.name.startswith("id_")])
-
-    # --- LP Category ---
-    # Objects: LP truth values / belief states
+    # --- Build LP Category ---
     lp_cat = Category("LogicProgram")
     lp_false = lp_cat.add_object("lp_false")
     lp_true = lp_cat.add_object("lp_true")
     lp_cat.add_morphism(lp_false, lp_true, "assert")
+    # lp_true has |Hom(-, lp_true)| = 2 (id + assert)
+    # lp_false has |Hom(-, lp_false)| = 1 (id only)
+    # So lp_true > lp_false in Yoneda profile
 
-    print("\nLP Category objects:", [o.name for o in lp_cat.objects])
-    print("LP Category morphisms:", [m.name for m in lp_cat.morphisms
-                                     if not m.name.startswith("id_")])
+    # ============================================================
+    # FUNCTOR A: Collapse (degenerate threshold — everything passes)
+    # ============================================================
+    print("\n--- Functor A: Collapse (threshold too low) ---")
+    print("Maps: state_low → lp_true, state_high → lp_true")
+    print("This models a threshold so low that all NN outputs pass.\n")
 
-    # --- Lossy Functor: NN → LP ---
-    # Both NN states map to lp_true — this collapses the ordering distinction.
-    # This models threshold translation: any activation above 0 → True.
-    lossy_F = Functor("NN_to_LP_lossy", nn_cat, lp_cat)
-    lossy_F.map_object(state_low, lp_true)   # lossy: low maps to True
-    lossy_F.map_object(state_high, lp_true)  # lossy: high also maps to True
+    F_collapse = Functor("NN_to_LP_collapse", nn_cat, lp_cat)
+    F_collapse.map_object(s_low, lp_true)
+    F_collapse.map_object(s_high, lp_true)
+    # Map morphisms: both activate and amplify go to id(lp_true)
+    # since source and target both map to lp_true
+    id_true = lp_cat.identity(lp_true)
+    for m in nn_cat.morphisms:
+        if m.source != m.target:  # non-identity
+            F_collapse.map_morphism(m, id_true)
+        else:
+            F_collapse.map_morphism(m, lp_cat.identity(F_collapse.apply_object(m.source)))
 
-    print("\nFunctor object mappings:")
-    print(f"  state_low  → {lossy_F.apply_object(state_low).name}")
-    print(f"  state_high → {lossy_F.apply_object(state_high).name}")
-    print("  (Both states collapse to lp_true — ordering information destroyed)")
-
-    # --- Yoneda Verification ---
-    checker = YonedaChecker()
-    result = checker.verify_invariant_persistence(
-        source_cat=nn_cat,
-        target_cat=lp_cat,
-        functor=lossy_F,
-        invariant_type="ordering",
-        objects=[state_high, state_low],
+    result_a = checker.verify_invariant_persistence(
+        source_cat=nn_cat, target_cat=lp_cat,
+        functor=F_collapse, invariant_type="ordering",
+        objects=[s_high, s_low]
     )
+    for step in result_a["proof_steps"]:
+        print(f"  {step}")
+    print(f"\n  Ordering persists: {result_a['verified']}")
 
-    print("\n" + "-" * 70)
-    print("PROOF STEPS (ordering invariant: state_high > state_low)")
-    print("-" * 70)
-    for step in result["proof_steps"]:
-        print(" ", step)
+    # Also check bounded persistence
+    result_a_bounded = checker.verify_invariant_persistence(
+        source_cat=nn_cat, target_cat=lp_cat,
+        functor=F_collapse, invariant_type="bounded",
+        objects=[s_high, s_low]
+    )
+    print(f"  Bounded persists:  {result_a_bounded['verified']}")
 
-    print("\n" + "-" * 70)
-    verified = result["verified"]
-    lossiness = result["lossiness"]
-    print(f"Verified:    {verified}")
-    print(f"Faithful:    {lossiness['faithful']}  "
-          f"(False → functor collapses morphisms → ordering not guaranteed)")
-    print(f"Full:        {lossiness['full']}")
-    print(f"Conclusion:  {'Ordering persists under functor' if verified else 'Ordering NOT certified — functor is lossy/non-faithful'}")
+    # ============================================================
+    # FUNCTOR B: Proper threshold (ordering preserved)
+    # ============================================================
+    print("\n--- Functor B: Proper threshold ---")
+    print("Maps: state_low → lp_false, state_high → lp_true")
+    print("This models a well-calibrated threshold translation.\n")
+
+    F_threshold = Functor("NN_to_LP_threshold", nn_cat, lp_cat)
+    F_threshold.map_object(s_low, lp_false)
+    F_threshold.map_object(s_high, lp_true)
+    # Map morphisms
+    # id(state_low) → id(lp_false), id(state_high) → id(lp_true)
+    F_threshold.map_morphism(nn_cat.identity(s_low), lp_cat.identity(lp_false))
+    F_threshold.map_morphism(nn_cat.identity(s_high), lp_cat.identity(lp_true))
+    # activate, amplify: state_low → state_high maps to assert: lp_false → lp_true
+    assert_morph = None
+    for m in lp_cat.morphisms:
+        if m.source == lp_false and m.target == lp_true and m.name == "assert":
+            assert_morph = m
+            break
+    if assert_morph:
+        for m in nn_cat.morphisms:
+            if m.source == s_low and m.target == s_high:
+                F_threshold.map_morphism(m, assert_morph)
+
+    result_b = checker.verify_invariant_persistence(
+        source_cat=nn_cat, target_cat=lp_cat,
+        functor=F_threshold, invariant_type="ordering",
+        objects=[s_high, s_low]
+    )
+    for step in result_b["proof_steps"]:
+        print(f"  {step}")
+    print(f"\n  Ordering persists: {result_b['verified']}")
+
+    result_b_bounded = checker.verify_invariant_persistence(
+        source_cat=nn_cat, target_cat=lp_cat,
+        functor=F_threshold, invariant_type="bounded",
+        objects=[s_high, s_low]
+    )
+    print(f"  Bounded persists:  {result_b_bounded['verified']}")
+
+    # ============================================================
+    # SUMMARY
+    # ============================================================
+    print("\n" + "=" * 70)
+    print("YONEDA VERIFICATION SUMMARY")
+    print("=" * 70)
+    print("""
+    Functor A (Collapse — degenerate threshold):
+      Ordering:    DESTROYED — both states collapse to same LP object
+      Boundedness: PRESERVED — objects remain in finite LP category
+
+    Functor B (Proper threshold):
+      Ordering:    PRESERVED — Hom-set magnitude ordering maintained
+      Boundedness: PRESERVED — objects remain in finite LP category
+
+    Key insight: The system detects WHICH invariants persist under
+    WHICH translations. A well-calibrated threshold preserves ordering;
+    a degenerate one destroys it. Structural invariant detection
+    identifies this automatically — enabling the coordination controller
+    to trigger reconfiguration when a previously-persistent invariant
+    degrades (e.g., threshold drift causes collapse).
+    """)
+
+    # Verify functor properties
+    print(f"  Functor A faithful (injective on morphisms): {F_collapse.is_faithful()}")
+    print(f"  Functor B faithful (injective on morphisms): {F_threshold.is_faithful()}")
+    print(f"  → Both functors are lossy, but B preserves more structure than A")
     print("=" * 70)
 
 
